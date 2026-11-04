@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>熊猫来财</title>
+<style>
+    * { box-sizing: border-box; }
+    body { 
+        margin: 0; 
+        padding: 0; 
+        font-family: 'Comic Sans MS', cursive, sans-serif; 
+        background: #e0f7fa; 
+        display: flex; 
+        justify-content: center; 
+        align-items: center; 
+        min-height: 100vh; 
+        overflow: hidden; 
+    }
+    #gameContainer { 
+        position: relative; 
+        width: 400px; 
+        height: 600px; 
+        background: #fff9c4; 
+        border: 4px solid #81c784; 
+        border-radius: 20px; 
+        box-shadow: 0 10px 20px rgba(0,0,0,0.2); 
+        overflow: hidden; 
+    }
+    canvas { display: block; background: #f1f8e9; }
+    .ui-panel { 
+        position: absolute; 
+        top: 0; 
+        left: 0; 
+        width: 100%; 
+        height: 100%; 
+        background: rgba(255,255,255,0.96); 
+        display: flex; 
+        flex-direction: column; 
+        align-items: center; 
+        justify-content: center; 
+        z-index: 30; /* 拉高层级，高于动画/过渡遮罩 */
+        padding: 20px; 
+        text-align: center; 
+    }
+    .hidden { display: none !important; }
+    h1 { color: #2e7d32; margin: 0 0 10px; font-size: 32px; }
+    h2 { color: #388e3c; font-size: 26px; margin: 0 0 15px; }
+    p { color: #555; font-size: 16px; margin: 6px 0; line-height: 1.5; }
+    .btn { 
+        background: #66bb6a; 
+        color: white; 
+        border: none; 
+        padding: 12px 26px; 
+        font-size: 18px; 
+        border-radius: 30px; 
+        margin: 8px; 
+        cursor: pointer; 
+        box-shadow: 0 4px 6px rgba(0,0,0,0.12); 
+        transition: all 0.2s ease;
+        position:relative;
+        z-index:99;
+        pointer-events:auto !important;
+    }
+    .btn:hover { background: #4caf50; transform: translateY(-2px); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { background: #bdbdbd; cursor: not-allowed; transform: none; box-shadow: none; }
+    .btn-small { padding: 8px 18px; font-size: 14px; }
+    .status-bar { 
+        position: absolute; 
+        top: 12px; 
+        left: 12px; 
+        right: 12px; 
+        display: none; 
+        justify-content: space-between; 
+        font-size: 16px; 
+        font-weight: bold; 
+        color: #2e7d32; 
+        z-index: 5; 
+        pointer-events: none;
+    }
+    .difficulty-btns { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
+    .animation-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none !important; /* 动画层完全穿透点击 */
+        z-index: 15;
+    }
+    .scene-transition {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-size: cover;
+        background-position: center;
+        z-index: 20;
+        pointer-events: none !important; /* 过渡遮罩不拦截点击 */
+        animation: sceneFade 1s ease-in-out forwards;
+    }
+    @keyframes sceneFade {
+        0% { opacity: 0; }
+        50% { opacity: 1; }
+        100% { opacity: 0; }
+    }
+</style>
+</head>
+<body>
+
+<div id="gameContainer">
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <div class="animation-container" id="animationContainer"></div>
+    
+    <div class="status-bar" id="statusBar">
+        <span id="hudScore">得分: 0/250</span>
+        <span id="hudStamina">体力: 5</span>
+    </div>
+
+    <!-- 主菜单 -->
+    <div class="ui-panel" id="menuPanel">
+        <h1>🐼 熊猫来财 🎋</h1>
+        <p>总积分: <span id="menuTotalScore">0</span> | 体力: <span id="menuStamina">5</span> | 竹子: <span id="menuBamboo">0</span></p>
+        <p>竹林已种: <span id="menuPlanted">0</span>根 (每小时产<span id="menuIncome">0</span>积分)</p>
+        
+        <div class="difficulty-btns">
+            <button class="btn" onclick="startGame('slow')">慢速</button>
+            <button class="btn" onclick="startGame('medium')">中速</button>
+            <button class="btn" onclick="startGame('fast')">快速</button>
+        </div>
+        
+        <div style="margin-top: 20px;">
+            <button class="btn btn-small" onclick="eatBamboo()">吃竹子 (3根=1体力)</button>
+            <button class="btn btn-small" onclick="buyBamboo()">买竹子 (20积分=1根)</button>
+        </div>
+        <button class="btn" onclick="showForest()">🎋 去竹林</button>
+    </div>
+
+    <!-- 竹林面板 -->
+    <div class="ui-panel hidden" id="forestPanel">
+        <div style="background: rgba(255,255,255,0.8); padding: 20px; border-radius: 15px;">
+            <h2>🎋 翠竹林</h2>
+            <p>背包竹子: <span id="forestBamboo">0</span> | 已种植: <span id="forestPlanted">0</span></p>
+            <button class="btn" id="chopBtn" onclick="chopBamboo()">🪓 砍竹子</button>
+            <button class="btn" onclick="plantBamboo()">🌱 种植竹子</button>
+            <button class="btn btn-small" onclick="showMenu()">返回</button>
+        </div>
+    </div>
+
+    <!-- 结算面板 -->
+    <div class="ui-panel hidden" id="resultPanel">
+        <h2 id="resultTitle">游戏结束</h2>
+        <p id="resultMsg"></p>
+        <button class="btn" onclick="showMenu()">返回主菜单</button>
+    </div>
+</div>
+
+<script>
+// ================= 音效管理 =================
+const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+// 生成音效函数
+function generateSound(type, options = {}) {
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    switch(type) {
+        case 'coin':
+            oscillator.type = 'sine';
+            oscillator.frequency.value = 880;
+            gainNode.gain.value = 0.1;
+            oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + 0.2);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.2);
+            break;
+        case 'ingot':
+            oscillator.type = 'triangle';
+            oscillator.frequency.value = 660;
+            gainNode.gain.value = 0.1;
+            oscillator.frequency.exponentialRampToValueAtTime(330, audioContext.currentTime + 0.3);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.3);
+            break;
+        case 'firecracker':
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.value = 220;
+            gainNode.gain.value = 0.2;
+            oscillator.frequency.exponentialRampToValueAtTime(880, audioContext.currentTime + 0.1);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.5);
+            break;
+        case 'plant':
+            oscillator.type = 'sine';
+            oscillator.frequency.value = 330;
+            gainNode.gain.value = 0.1;
+            oscillator.frequency.exponentialRampToValueAtTime(550, audioContext.currentTime + 0.5);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.5);
+            break;
+        case 'chop':
+            oscillator.type = 'square';
+            oscillator.frequency.value = 110;
+            gainNode.gain.value = 0.1;
+            oscillator.frequency.exponentialRampToValueAtTime(220, audioContext.currentTime + 0.2);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.2);
+            break;
+        case 'buy':
+            oscillator.type = 'triangle';
+            oscillator.frequency.value = 440;
+            gainNode.gain.value = 0.1;
+            oscillator.frequency.exponentialRampToValueAtTime(660, audioContext.currentTime + 0.1);
+            oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + 0.2);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.2);
+            break;
+        case 'start':
+            oscillator.type = 'sine';
+            oscillator.frequency.value = 550;
+            gainNode.gain.value = 0.1;
+            oscillator.frequency.exponentialRampToValueAtTime(880, audioContext.currentTime + 0.3);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.3);
+            break;
+        case 'end':
+            oscillator.type = 'sine';
+            oscillator.frequency.value = 660;
+            gainNode.gain.value = 0.1;
+            oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + 0.5);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.5);
+            break;
+        case 'eat':
+            oscillator.type = 'square';
+            oscillator.frequency.value = 220;
+            gainNode.gain.value = 0.1;
+            oscillator.frequency.exponentialRampToValueAtTime(330, audioContext.currentTime + 0.1);
+            oscillator.frequency.exponentialRampToValueAtTime(220, audioContext.currentTime + 0.2);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.2);
+            break;
+    }
+}
+
+// ================= 动画管理 =================
+function createAnimation(type, options = {}) {
+    const container = document.getElementById('animationContainer');
+    const animEl = document.createElement('div');
+    animEl.style.position = 'absolute';
+    animEl.style.zIndex = '15';
+    animEl.style.pointerEvents = 'none';
+    
+    switch(type) {
+        case 'pandaRun':
+            animEl.textContent = '🐼';
+            animEl.style.fontSize = '40px';
+            animEl.style.left = '50%';
+            animEl.style.bottom = '20px';
+            animEl.style.transform = 'translateX(-50%)';
+            animEl.style.animation = 'run 0.8s ease-out forwards';
+            break;
+        case 'shop':
+            animEl.textContent = '🏪👓';
+            animEl.style.fontSize = '30px';
+            animEl.style.left = '50%';
+            animEl.style.top = '50%';
+            animEl.style.transform = 'translate(-50%, -50%)';
+            animEl.style.animation = 'pulse 0.5s ease-out forwards';
+            break;
+        case 'chop':
+            animEl.textContent = '🪓';
+            animEl.style.fontSize = '30px';
+            animEl.style.left = '50%';
+            animEl.style.top = '50%';
+            animEl.style.transform = 'translate(-50%, -50%)';
+            animEl.style.animation = 'chop 0.3s ease-out forwards';
+            break;
+        case 'plant':
+            animEl.textContent = '🌱';
+            animEl.style.fontSize = '30px';
+            animEl.style.left = '50%';
+            animEl.style.top = '50%';
+            animEl.style.transform = 'translate(-50%, -50%)';
+            animEl.style.animation = 'grow 0.5s ease-out forwards';
+            break;
+        case 'eat':
+            animEl.textContent = '🐼🎋';
+            animEl.style.fontSize = '40px';
+            animEl.style.left = '50%';
+            animEl.style.top = '50%';
+            animEl.style.transform = 'translate(-50%, -50%)';
+            animEl.style.animation = 'eat 0.5s ease-out forwards';
+            break;
+    }
+    
+    container.appendChild(animEl);
+    
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes run {
+            0% { transform: translateX(-50%) translateX(-100px); }
+            100% { transform: translateX(-50%) translateX(100px); opacity: 0; }
+        }
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+            50% { transform: translate(-50%, -50%) scale(1.5); opacity: 0.8; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+        }
+        @keyframes chop {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            50% { transform: translate(-50%, -50%) rotate(45deg); }
+            100% { transform: translate(-50%, -50%) rotate(0deg); opacity: 0; }
+        }
+        @keyframes grow {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0.5; }
+            100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+        }
+        @keyframes eat {
+            0% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.2); }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    setTimeout(() => {
+        container.removeChild(animEl);
+        document.head.removeChild(style);
+    }, 1000);
+}
+
+// 创建场景过渡
+function createSceneTransition(imageUrl) {
+    const container = document.getElementById('gameContainer');
+    const sceneEl = document.createElement('div');
+    sceneEl.className = 'scene-transition';
+    sceneEl.style.backgroundImage = `url(${imageUrl})`;
+    
+    container.appendChild(sceneEl);
+    
+    setTimeout(() => {
+        container.removeChild(sceneEl);
+    }, 1000);
+}
+
+// ================= 本地存档数据管理 =================
+let playerData = {
+    totalScore: 0,
+    stamina: 5,
+    bamboo: 0,
+    plantedBamboo: 0,
+    lastUpdateTime: Date.now()
+};
+
+function loadData() {
+    const saved = localStorage.getItem('pandaGameSave');
+    if (saved) {
+        playerData = JSON.parse(saved);
+        const now = Date.now();
+        const hourDiff = (now - playerData.lastUpdateTime) / (1000 * 60 * 60);
+        if (hourDiff >= 1 && playerData.plantedBamboo > 0) {
+            const offlineGain = Math.floor(hourDiff) * playerData.plantedBamboo * 10;
+            playerData.totalScore += offlineGain;
+            setTimeout(() => alert(`离线竹林收益：+${offlineGain} 积分！`), 300);
+        }
+        playerData.lastUpdateTime = now;
+    }
+    saveData();
+}
+
+function saveData() {
+    localStorage.setItem('pandaGameSave', JSON.stringify(playerData));
+    updateUI();
+}
+
+function updateUI() {
+    document.getElementById('menuTotalScore').textContent = playerData.totalScore;
+    document.getElementById('menuStamina').textContent = playerData.stamina;
+    document.getElementById('menuBamboo').textContent = playerData.bamboo;
+    document.getElementById('menuPlanted').textContent = playerData.plantedBamboo;
+    document.getElementById('menuIncome').textContent = playerData.plantedBamboo * 10;
+    
+    document.getElementById('forestBamboo').textContent = playerData.bamboo;
+    document.getElementById('forestPlanted').textContent = playerData.plantedBamboo;
+    
+    document.getElementById('hudStamina').textContent = `体力: ${playerData.stamina}`;
+}
+
+// ================= 竹子、体力、竹林系统 =================
+function eatBamboo() {
+    if (playerData.bamboo >= 3) {
+        playerData.bamboo -= 3;
+        playerData.stamina += 1;
+        generateSound('eat');
+        createAnimation('eat');
+        saveData();
+    } else {
+        alert("竹子不足！恢复1点体力需要3根竹子");
+    }
+}
+
+function buyBamboo() {
+    if (playerData.totalScore >= 20) {
+        playerData.totalScore -= 20;
+        playerData.bamboo += 1;
+        generateSound('buy');
+        createAnimation('shop');
+        createSceneTransition('https://picsum.photos/id/1036/400/600');
+        saveData();
+    } else {
+        alert("积分不足！兑换1根竹子需要20积分");
+    }
+}
+
+let chopCooldown = false;
+function chopBamboo() {
+    if (chopCooldown) return;
+    chopCooldown = true;
+    const chopBtn = document.getElementById('chopBtn');
+    chopBtn.disabled = true;
+    
+    const get = Math.random() > 0.5 ? 2 : 1;
+    playerData.bamboo += get;
+    generateSound('chop');
+    createAnimation('chop');
+    saveData();
+    alert(`砍竹成功！获得 ${get} 根竹子`);
+    
+    setTimeout(() => {
+        chopCooldown = false;
+        chopBtn.disabled = false;
+    }, 1500);
+}
+
+function plantBamboo() {
+    if (playerData.bamboo > 0) {
+        playerData.bamboo -= 1;
+        playerData.plantedBamboo += 1;
+        playerData.lastUpdateTime = Date.now();
+        generateSound('plant');
+        createAnimation('plant');
+        saveData();
+    } else {
+        alert("背包没有竹子，无法种植！");
+    }
+}
+
+// ================= 接金币小游戏核心逻辑 =================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let gameRunning = false;
+let currentScore = 0;
+const panda = { x: 200, y: 520, width: 60, height: 60 };
+let items = [];
+let difficulty = 'medium';
+let spawnTimer = 0;
+let animFrame = null;
+
+const diffSettings = {
+    slow: { speed: 2.5, interval: 80 },
+    medium: { speed: 4, interval: 50 },
+    fast: { speed: 6, interval: 30 }
+};
+
+function startGame(diff) {
+    if (playerData.stamina <= 0) {
+        alert("体力耗尽！去吃竹子恢复体力吧");
+        return;
+    }
+    
+    playerData.stamina -= 1;
+    saveData();
+    
+    difficulty = diff;
+    currentScore = 0;
+    items = [];
+    spawnTimer = 0;
+    panda.x = canvas.width / 2;
+    gameRunning = true;
+    
+    document.getElementById('menuPanel').classList.add('hidden');
+    document.getElementById('statusBar').style.display = 'flex';
+    document.getElementById('hudScore').textContent = `得分: ${currentScore}/250`;
+    
+    generateSound('start');
+    
+    if (animFrame) cancelAnimationFrame(animFrame);
+    gameLoop();
+}
+
+function gameLoop() {
+    if (!gameRunning) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.fillStyle = "#c8e6c9";
+    for(let i = 0; i < 5; i++) { 
+        ctx.fillRect(i * 90, 580, 60, 20); 
+    }
+
+    spawnTimer++;
+    if (spawnTimer >= diffSettings[difficulty].interval) {
+        spawnItem();
+        spawnTimer = 0;
+    }
+    
+    const fallSpeed = diffSettings[difficulty].speed;
+    for (let i = items.length - 1; i >= 0; i--) {
+        const item = items[i];
+        item.y += fallSpeed;
+        item.rotation += item.rotationSpeed;
+        
+        ctx.save();
+        ctx.translate(item.x, item.y);
+        ctx.rotate(item.rotation);
+        ctx.font = "32px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(item.emoji, 0, 0);
+        ctx.restore();
+        
+        const plateTop = panda.y;
+        const plateBottom = panda.y + 25;
+        if (item.y >= plateTop && item.y <= plateBottom && Math.abs(item.x - panda.x) < 42) {
+            if (item.type === 'coin') {
+                currentScore += 1;
+                generateSound('coin');
+            } else if (item.type === 'ingot') {
+                currentScore += 5;
+                generateSound('ingot');
+            } else if (item.type === 'firecracker') {
+                generateSound('firecracker');
+                endGame(false);
+                return;
+            }
+            items.splice(i, 1);
+            document.getElementById('hudScore').textContent = `得分: ${currentScore}/250`;
+            if (currentScore >= 250) {
+                endGame(true);
+                return;
+            }
+            continue;
+        }
+        
+        if (item.y > canvas.height) {
+            items.splice(i, 1);
+        }
+    }
+    
+    ctx.font = "52px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("🐼", panda.x, panda.y + 42);
+    
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#bdbdbd";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(panda.x, panda.y + 18, 42, 11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    
+    animFrame = requestAnimationFrame(gameLoop);
+}
+
+function spawnItem() {
+    const rand = Math.random();
+    let type, emoji, rotationSpeed;
+    if (rand < 0.15) {
+        type = 'firecracker'; 
+        emoji = '🧨';
+        rotationSpeed = 0.1;
+    } else if (rand < 0.35) {
+        type = 'ingot'; 
+        emoji = '💰';
+        rotationSpeed = -0.05;
+    } else {
+        type = 'coin'; 
+        emoji = '🪙';
+        rotationSpeed = 0.05;
+    }
+    items.push({
+        x: Math.max(30, Math.min(canvas.width - 30, Math.random() * canvas.width)),
+        y: -25,
+        type,
+        emoji,
+        rotation: 0,
+        rotationSpeed
+    });
+}
+
+function endGame(isWin) {
+    gameRunning = false;
+    if (animFrame) cancelAnimationFrame(animFrame);
+    playerData.totalScore += currentScore;
+    saveData();
+    
+    generateSound('end');
+    
+    document.getElementById('statusBar').style.display = 'none';
+    document.getElementById('resultPanel').classList.remove('hidden');
+    if (isWin) {
+        document.getElementById('resultTitle').textContent = "🎉 挑战成功！";
+        document.getElementById('resultMsg').textContent = `本局得分：${currentScore}\n总积分 +${currentScore}`;
+    } else {
+        document.getElementById('resultTitle').textContent = "💥 碰到鞭炮，挑战失败";
+        document.getElementById('resultMsg').textContent = `本局得分：${currentScore}\n总积分 +${currentScore}`;
+    }
+}
+
+// ================= 界面切换函数 =================
+function showMenu() {
+    gameRunning = false;
+    if (animFrame) cancelAnimationFrame(animFrame);
+    document.getElementById('resultPanel').classList.add('hidden');
+    document.getElementById('forestPanel').classList.add('hidden');
+    document.getElementById('menuPanel').classList.remove('hidden');
+    document.getElementById('statusBar').style.display = 'none';
+    updateUI();
+}
+
+function showForest() {
+    createAnimation('pandaRun');
+    createSceneTransition('https://picsum.photos/id/1036/400/600');
+    setTimeout(() => {
+        document.getElementById('menuPanel').classList.add('hidden');
+        document.getElementById('forestPanel').classList.remove('hidden');
+        updateUI();
+    }, 1000);
+}
+
+// ================= 移动端+PC端移动控制 =================
+canvas.addEventListener('mousemove', e => {
+    if (!gameRunning) return;
+    const rect = canvas.getBoundingClientRect();
+    let targetX = e.clientX - rect.left;
+    panda.x = Math.max(40, Math.min(canvas.width - 40, targetX));
+});
+
+canvas.addEventListener('touchmove', e => {
+    if (!gameRunning) return;
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    let targetX = e.touches[0].clientX - rect.left;
+    panda.x = Math.max(40, Math.min(canvas.width - 40, targetX));
+}, { passive: false });
+
+window.onload = () => {
+    loadData();
+    showMenu();
+};
+</script>
+</body>
+</html>
